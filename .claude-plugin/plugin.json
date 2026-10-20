@@ -1,1 +1,1 @@
-{ "name": "gsd-panel", "version": "0.2.2", "description": "Pane with the open GSD milestone of the current repo, plus /clear and next-action buttons", "types": "./types/index.d.ts" }
+{ "name": "gsd-panel", "version": "0.3.0", "description": "Pane with the open GSD milestone of the current repo, plus /clear and next-action buttons", "types": "./types/index.d.ts" }

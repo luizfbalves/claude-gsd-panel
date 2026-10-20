@@ -3,7 +3,24 @@ export type Plan = { id: string; mark: PlanMark; isCheckpoint: boolean }
 export type Wave = { n: number; plans: Plan[] }
 export type Phase = { n: string; name: string; isDone: boolean }
 export type NextAction = { command: string; args: string }
+export type Git = { branch: string; changes: number; ahead: number; behind: number }
+export type Repo = { name: string; root: string; version: string; status: string; isOpen: boolean }
+export type LiveRun = { agentId: string; plan: string; startedAt: number; lastTool: string }
+export type Checkpoint = {
+  phase: string
+  plan: string
+  title: string
+  kind: string
+  steps: string[]
+  resume: string
+  since: number
+}
 export type Milestone = {
+  root: string
+  repo: string
+  blockers: string[]
+  todos: number
+  git: Git | null
   version: string
   name: string
   status: string
@@ -29,6 +46,16 @@ export type PhaseDetail = {
 
 declare module 'claude-code' {
   interface PluginState {
-    'gsd-panel': { milestone: Milestone | null; isDismissed: boolean; detail: PhaseDetail | null }
+    'gsd-panel': {
+      milestone: Milestone | null
+      isDismissed: boolean
+      detail: PhaseDetail | null
+      repos: Repo[]
+      selectedRoot: string | null
+      live: LiveRun[]
+      now: number
+      checkpoint: Checkpoint | null
+      isExecuting: boolean
+    }
   }
 }

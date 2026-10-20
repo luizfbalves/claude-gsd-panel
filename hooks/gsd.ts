@@ -1,6 +1,6 @@
 import type { EngineInterface } from 'claude-code'
 
-import type { Milestone, NextAction, Phase, PhaseDetail, Plan, PlanDetail, Wave } from '../types'
+import type { Checkpoint, Git, Milestone, NextAction, Phase, PhaseDetail, Plan, PlanDetail, Repo, Wave } from '../types'
 
 type Front = Record<string, string>
 
@@ -33,7 +33,7 @@ async function readOr(api: EngineInterface, path: string) {
   }
 }
 
-async function findPlanning(api: EngineInterface) {
+export async function findPlanning(api: EngineInterface) {
   let dir = await api.session.cwd()
   for (let i = 0; i < 6 && dir; i++) {
     if (await api.fs.exists(`${dir}/.planning/STATE.md`)) return `${dir}/.planning`
@@ -102,13 +102,107 @@ function recommend(phases: Phase[], n: string | null, files: string[], waves: Wa
   return { command: 'gsd-next', args: '' }
 }
 
-export async function loadMilestone(api: EngineInterface): Promise<Milestone | null> {
-  const root = await findPlanning(api)
+const CLOSED = /\bcomplete\b|milestone_complete|shipped|archived/i
+
+const base = (path: string) => path.replace(/\/+$/, '').replace(/^.*\//, '')
+const parentOf = (path: string) => path.replace(/\/[^/]+\/?$/, '')
+
+// Bullets under the first `###` heading matching `heading`, up to the next heading.
+function bullets(text: string, heading: RegExp) {
+  const lines = text.split('\n')
+  const at = lines.findIndex(l => /^#{2,4}\s/.test(l) && heading.test(l))
+  if (at < 0) return []
+  const out: string[] = []
+  for (const l of lines.slice(at + 1)) {
+    if (/^#{1,4}\s/.test(l)) break
+    const item = /^\s*[-*]\s+(.+)$/.exec(l)?.[1]
+    if (item) out.push(item.replace(/\*\*|`/g, '').trim())
+  }
+  return out.filter(b => !/^(none|nenhum)/i.test(b))
+}
+
+async function gitState(api: EngineInterface, dir: string): Promise<Git | null> {
+  try {
+    const r = await api.process.run(['git', 'status', '--porcelain=v1', '--branch'], { cwd: dir, timeoutMs: 3000 })
+    if (r.exitCode !== 0) return null
+    const [head = '', ...rest] = r.stdout.split('\n')
+    return {
+      branch: /^## (?:No commits yet on )?([^.\s]+)/.exec(head)?.[1] ?? '',
+      changes: rest.filter(l => l.trim() !== '').length,
+      ahead: Number(/ahead (\d+)/.exec(head)?.[1] ?? 0),
+      behind: Number(/behind (\d+)/.exec(head)?.[1] ?? 0),
+    }
+  } catch {
+    return null
+  }
+}
+
+async function repoOf(api: EngineInterface, root: string): Promise<Repo> {
+  const fm = frontmatter((await readOr(api, `${root}/STATE.md`)) ?? '')
+  const status = fm.status ?? ''
+  return {
+    name: base(parentOf(root)),
+    root,
+    version: fm.milestone ?? '',
+    status,
+    isOpen: Boolean(fm.milestone) && !CLOSED.test(status),
+  }
+}
+
+
+// A GSD workspace is a folder holding WORKSPACE.md; each child with .planning/STATE.md is one repo.
+export async function findRepos(api: EngineInterface): Promise<Repo[]> {
+  const near = await findPlanning(api)
+  let dir = await api.session.cwd()
+  for (let i = 0; i < 6 && dir; i++) {
+    if (await api.fs.exists(`${dir}/WORKSPACE.md`)) {
+      const roots = [`${dir}/.planning`]
+      for (const d of await api.fs.list(dir).catch(() => [])) {
+        if (d.kind === 'dir' && !d.name.startsWith('.')) roots.push(`${dir}/${d.name}/.planning`)
+      }
+      const found: string[] = []
+      for (const r of roots) if (await api.fs.exists(`${r}/STATE.md`)) found.push(r)
+      return Promise.all(found.map(r => repoOf(api, r)))
+    }
+    const up = parentOf(dir)
+    if (up === dir) break
+    dir = up
+  }
+  return near ? [await repoOf(api, near)] : []
+}
+
+export async function loadCheckpoint(api: EngineInterface, root: string, n: string, id: string, since: number): Promise<Checkpoint | null> {
+  const dir = await phaseDir(api, root, n)
+  if (!dir) return null
+  const files = (await api.fs.list(`${root}/phases/${dir.name}`)).map(f => f.name)
+  const file = files.find(f => new RegExp(`^[\\d.]+-${id}-PLAN\\.md$`).test(f))
+  const plan = file ? ((await readOr(api, `${root}/phases/${dir.name}/${file}`)) ?? '') : ''
+  const task = /<task[^>]*type="checkpoint:([\w-]+)"[^>]*>([\s\S]*?)<\/task>/.exec(plan)
+  const body = task?.[2] ?? ''
+  const tag = (name: string) => new RegExp(`<${name}>\\s*([\\s\\S]*?)<\\/${name}>`).exec(body)?.[1]?.trim() ?? ''
+  const steps = (tag('how-to-verify') || tag('decision') || tag('action'))
+    .split('\n')
+    .map(l => l.replace(/^\s*(\d+\.|[-*])\s*/, '').trim())
+    .filter(Boolean)
+    .slice(0, 4)
+  return {
+    phase: n,
+    plan: id,
+    title: tag('name') || tag('what-built') || objective(plan) || `Plan ${n}-${id}`,
+    kind: task?.[1] ?? 'human-verify',
+    steps,
+    resume: tag('resume-signal'),
+    since,
+  }
+}
+
+export async function loadMilestone(api: EngineInterface, chosen?: string | null): Promise<Milestone | null> {
+  const root = chosen ?? (await findPlanning(api))
   if (!root) return null
   const state = (await readOr(api, `${root}/STATE.md`)) ?? ''
   const fm = frontmatter(state)
   const status = fm.status ?? ''
-  if (!fm.milestone || /\bcomplete\b|milestone_complete|shipped|archived/i.test(status)) return null
+  if (!fm.milestone || CLOSED.test(status)) return null
 
   const phases = roadmapPhases((await readOr(api, `${root}/ROADMAP.md`)) ?? '')
   const fromBody = /^Phase:\s*([\d.]+)/m.exec(state)?.[1]
@@ -125,6 +219,11 @@ export async function loadMilestone(api: EngineInterface): Promise<Milestone | n
   }
 
   return {
+    root,
+    repo: base(parentOf(root)),
+    blockers: bullets(state, /Blockers/i),
+    todos: bullets(state, /Pending Todos/i).length,
+    git: await gitState(api, parentOf(root)),
     version: fm.milestone,
     name: fm.milestone_name ?? '',
     status,
@@ -159,8 +258,8 @@ function objective(plan: string) {
   return text.split('\n').find(l => l.trim() !== '')?.trim() ?? ''
 }
 
-export async function loadPhaseDetail(api: EngineInterface, n: string): Promise<PhaseDetail | null> {
-  const root = await findPlanning(api)
+export async function loadPhaseDetail(api: EngineInterface, n: string, chosen?: string | null): Promise<PhaseDetail | null> {
+  const root = chosen ?? (await findPlanning(api))
   if (!root) return null
   const roadmap = (await readOr(api, `${root}/ROADMAP.md`)) ?? ''
   const phases = roadmapPhases(roadmap)

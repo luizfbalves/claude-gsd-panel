@@ -12,6 +12,14 @@ progress:
 ---
 
 Phase: 44 (Beta)
+
+### Pending Todos
+
+- Rename the flag
+
+### Blockers/Concerns
+
+- **Migrations** not applied in staging
 `
 const ROADMAP = `- [x] **Phase 43: Alpha** - a
 - [ ] **Phase 44: Beta** - b
@@ -52,20 +60,41 @@ const PANE = {
   props: { title: 'GSD', isFocused: false, bodyColumns: 40, placement: 'dock', scroll: { offset: 0, bodyRows: 30 }, view: {} },
 } as const
 
-function engine(on: any, files: Record<string, string>) {
+function engine(on: any, files: Record<string, string>, cwd = '/repo') {
   const ran: string[] = []
   on('command.register', () => ({ value: { command: 'gsd-panel' } }))
   on('ui.open', () => ({ value: { isPlaced: true } }))
   on('ui.close', () => ({ value: undefined }))
-  on('session.cwd', () => ({ value: '/repo' }))
+  on('session.cwd', () => ({ value: cwd }))
   on('fs.exists', (_: unknown, e: any) => ({ value: e.path in files }))
   on('fs.read', (_: unknown, e: any) => (e.path in files ? { value: files[e.path] } : { error: 'ENOENT' }))
   on('fs.list', (_: unknown, e: any) => ({ value: LISTS[e.path] ?? [] }))
+  on('tool.call', () => ({ result: {} }))
   on('command.run', (_: unknown, e: any) => {
     ran.push(`${e.command} ${e.args ?? ''}`.trim())
     return { text: '' }
   })
   on('session.start', (_: unknown, e: any) => ({ cwd: e.cwd }))
+  on('ui.status', () => ({ value: undefined }))
+  on('ui.toast', (_: unknown, e: any) => {
+    ran.push(`toast ${e.text}`)
+    return { value: undefined }
+  })
+  on('ui.focus', () => ({ value: { isFocused: true } }))
+  on('ui.notify', (_: unknown, e: any) => {
+    ran.push(`notify ${e.text}`)
+    return { value: { isSent: true, channel: 'terminal' } }
+  })
+  on('process.run', () => ({ value: { exitCode: 0, stdout: '## main...origin/main [ahead 2]\n M a.ts\n?? b.ts\n', stderr: '' } }))
+  on('prompt.submit', (_: unknown, e: any) => {
+    ran.push(`submit ${e.text}`)
+    return { text: e.text }
+  })
+  on('agent.spawn', () => ({ model: 'opus', agentId: 'a1' }))
+  on('turn.complete', () => ({ text: '' }))
+  on('clock.now', () => ({ value: 1_000_000 }))
+  on('clock.every', () => ({ value: undefined }))
+  on('prompt.fill', () => ({ value: { isFilled: true } }))
   return ran
 }
 
@@ -87,7 +116,7 @@ test('shows nothing when the milestone is complete', async ($, on) => {
   engine(on, { ...FILES, '/repo/.planning/STATE.md': STATE.replace('executing', 'milestone_complete') })
   await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
   const ui = await $.ui.mount(PANE)
-  expect((await ui.find({ type: 'Text', text: /No open GSD milestone/ }))?.text).toBeTruthy()
+  expect((await ui.find({ type: 'Text', text: /Sem milestone aberta/ }))?.text).toBeTruthy()
   await ui.unmount()
 })
 
@@ -109,4 +138,64 @@ test('a phase opens a detail dialog whose actions run for that phase', async ($,
   expect(ran).toEqual(['gsd-plan-phase 44'])
   await dialog.unmount()
   await pane.unmount()
+})
+
+test('shows git state, blockers and todos', async ($, on) => {
+  engine(on, FILES)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount(PANE)
+  expect((await ui.find({ type: 'Text', text: /⎇ main/ }))?.text).toContain('2 alterações')
+  expect((await ui.find({ type: 'Text', text: /Migrations not applied/ }))).toBeTruthy()
+  expect((await ui.find({ type: 'Text', text: /1 todos pendentes/ }))).toBeTruthy()
+  await ui.unmount()
+})
+
+test('a running executor shows live and a checkpoint raises the band', async ($, on) => {
+  const files = {
+    ...FILES,
+    '/repo/.planning/phases/44-beta/44-02-PLAN.md':
+      '---\nwave: 2\nautonomous: false\n---\n<task type="checkpoint:human-verify"><name>Check the flag in staging</name><how-to-verify>1. Open staging\n2. Toggle the flag</how-to-verify></task>\n',
+  }
+  const ran = engine(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.agent.spawn({ prompt: 'Execute plan 44-03', description: 'Execute 44-03', subagentType: 'gsd-executor' } as any)
+
+  const pane = await $.ui.mount(PANE)
+  expect((await pane.find({ type: 'Text', text: /44-03 executando/ }))).toBeTruthy()
+  await pane.unmount()
+
+  await $.turn.complete({ agentId: 'a1', reason: 'end_turn', answer: '' } as any)
+  await $.turn.complete({ reason: 'end_turn', answer: '' } as any)
+
+  const band = await $.ui.mount({ ...PANE, component: 'AbovePrompt', requestId: 'band', props: { hasSurvey: false, isWorking: false, maxRows: 20, bodyColumns: 80, scroll: { offset: 0, bodyRows: 20 }, view: {} } } as any)
+  expect((await band.find({ type: 'Text', text: /Check the flag in staging/ }))).toBeTruthy()
+  expect(ran.some(r => r.startsWith('notify 44-02'))).toBe(true)
+  await band.press({ key: 'approve' })
+  expect(ran).toContain('submit approved')
+  await band.unmount()
+})
+
+test('writing a SUMMARY raises a toast', async ($, on) => {
+  const ran = engine(on, FILES)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  await $.tool.call({ tool: 'Write', file_path: '/repo/.planning/phases/44-beta/44-02-SUMMARY.md', content: '' } as any)
+  expect(ran).toContain('toast ✓ 44-02 concluído')
+})
+
+test('a workspace lists its repos and switches between them', async ($, on) => {
+  const ws: Record<string, string> = {
+    '/ws/WORKSPACE.md': '',
+    '/ws/api/.planning/STATE.md': STATE,
+    '/ws/api/.planning/ROADMAP.md': ROADMAP,
+    '/ws/web/.planning/STATE.md': STATE.replace('Demo milestone', 'Web milestone').replace('v1.7', 'v2.0'),
+    '/ws/web/.planning/ROADMAP.md': ROADMAP,
+  }
+  LISTS['/ws'] = [entry('api', 'dir'), entry('web', 'dir'), entry('WORKSPACE.md', 'file')]
+  engine(on, ws, '/ws/api')
+  await $.session.start({ cwd: '/ws/api', surface: 'terminal', isInteractive: true })
+  const ui = await $.ui.mount(PANE)
+  expect((await ui.find({ type: 'Text', text: /Demo milestone/ }))).toBeTruthy()
+  await ui.press({ key: 'repo-web' })
+  expect((await ui.find({ type: 'Text', text: /Web milestone/ }))).toBeTruthy()
+  await ui.unmount()
 })
