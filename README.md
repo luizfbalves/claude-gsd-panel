@@ -6,9 +6,10 @@ A Claude Code mod that shows the open GSD milestone of the repo you are working 
 - the phases around the current one
 - the current phase's waves (✓ done, ◆ current wave, ○ pending, "stops for you" on checkpoints)
 - where work stopped (`stopped_at`)
+- click a phase for a detail dialog: goal, success criteria, each plan with its objective and summary, the phase files, and buttons to discuss, plan, execute or verify that phase
 - two buttons: `[1] /clear` and `[2] ▶ next action`, the GSD command recommended from `.planning/` (`/gsd-discuss-phase`, `/gsd-plan-phase`, `/gsd-execute-phase`, `/gsd-verify-work`, `/gsd-audit-milestone`, or `/gsd-next` when unclear)
 
-The pane opens by itself when `.planning/STATE.md` has an open milestone, and stays closed otherwise. `/gsd-panel` toggles it.
+It refreshes when a turn ends and whenever a tool writes under `.planning/`. The pane opens by itself when `.planning/STATE.md` has an open milestone, and stays closed otherwise. `/gsd-panel` toggles it.
 
 ## Install
 

@@ -17,13 +17,26 @@ const ROADMAP = `- [x] **Phase 43: Alpha** - a
 - [ ] **Phase 44: Beta** - b
 - [ ] **Phase 45: Gamma** - c
 `
+const ROADMAP_DETAIL = `${ROADMAP}
+### Phase 44: Beta
+**Goal**: Beta ships behind a flag
+**Success Criteria** (what must be TRUE):
+  1. The flag defaults to off
+  2. \`beta\` endpoint answers 200
+**Plans:** 1/3 plans complete
+- [x] 44-01-PLAN.md — Flag plumbing
+- [ ] 44-02-PLAN.md — Endpoint
+
+### Phase 45: Gamma
+`
 const PLAN = (wave: number) => `---\nwave: ${wave}\n---\n`
 const FILES: Record<string, string> = {
   '/repo/.planning/STATE.md': STATE,
   '/repo/.planning/ROADMAP.md': ROADMAP,
   '/repo/.planning/phases/44-beta/44-01-PLAN.md': PLAN(1),
   '/repo/.planning/phases/44-beta/44-02-PLAN.md': PLAN(2),
-  '/repo/.planning/phases/44-beta/44-03-PLAN.md': PLAN(2),
+  '/repo/.planning/phases/44-beta/44-03-PLAN.md': `${PLAN(2)}\n<objective>\nWire the dashboard\n</objective>\n`,
+  '/repo/.planning/phases/44-beta/44-01-SUMMARY.md': '---\nplan: 01\n---\n\n# Summary\n\n## One-liner\n\nFlag added to config.\n',
 }
 const entry = (name: string, kind: 'file' | 'dir') => ({ name, kind, size: 0, mtimeMs: 0, isLink: false })
 const LISTS: Record<string, ReturnType<typeof entry>[]> = {
@@ -76,4 +89,24 @@ test('shows nothing when the milestone is complete', async ($, on) => {
   const ui = await $.ui.mount(PANE)
   expect((await ui.find({ type: 'Text', text: /No open GSD milestone/ }))?.text).toBeTruthy()
   await ui.unmount()
+})
+
+const DIALOG = { ...PANE, requestId: 'gsd-phase' } as const
+
+test('a phase opens a detail dialog whose actions run for that phase', async ($, on) => {
+  const files = { ...FILES, '/repo/.planning/ROADMAP.md': ROADMAP_DETAIL }
+  const ran = engine(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'terminal', isInteractive: true })
+  const pane = await $.ui.mount(PANE)
+  await pane.press({ key: 'phase-44' })
+
+  const dialog = await $.ui.mount(DIALOG)
+  expect((await dialog.find({ type: 'Text', text: /Beta ships behind a flag/ }))).toBeTruthy()
+  expect((await dialog.find({ type: 'Text', text: /beta endpoint answers 200/ }))).toBeTruthy()
+  expect((await dialog.find({ type: 'Text', text: /Flag added to config/ }))).toBeTruthy()
+  expect((await dialog.find({ type: 'Text', text: /Wire the dashboard/ }))).toBeTruthy()
+  await dialog.press({ key: 'gsd-plan-phase' })
+  expect(ran).toEqual(['gsd-plan-phase 44'])
+  await dialog.unmount()
+  await pane.unmount()
 })

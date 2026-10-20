@@ -16,8 +16,19 @@ export type Milestone = {
   next: NextAction
 }
 
+export type PlanDetail = { id: string; wave: number; mark: PlanMark; objective: string; summary: string }
+export type PhaseDetail = {
+  n: string
+  name: string
+  goal: string
+  criteria: string[]
+  plans: PlanDetail[]
+  docs: string[]
+  next: NextAction
+}
+
 declare module 'claude-code' {
   interface PluginState {
-    'gsd-panel': { milestone: Milestone | null; isDismissed: boolean }
+    'gsd-panel': { milestone: Milestone | null; isDismissed: boolean; detail: PhaseDetail | null }
   }
 }
