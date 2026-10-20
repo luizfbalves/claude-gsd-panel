@@ -26,6 +26,10 @@ function title(m: Milestone) {
   return `GSD · ${m.version}`
 }
 
+function clip(text: string, max: number) {
+  return text.length <= max ? text : `${text.slice(0, Math.max(1, max - 1))}…`
+}
+
 function commandLine(a: NextAction) {
   return `/${a.command}${a.args ? ` ${a.args}` : ''}`
 }
@@ -107,38 +111,53 @@ export const register: Register = on => {
     const m = await read($, milestone)
     if (m === null) return <Text dimColor>No open GSD milestone.</Text>
 
-    const barWidth = Math.max(10, Math.min(30, e.props.bodyColumns - 6))
+    const width = Math.max(20, e.props.bodyColumns - 2)
+    const barWidth = Math.max(10, Math.min(30, width - 6))
     const filled = Math.round((m.percent / 100) * barWidth)
     const cur = m.current
-    const at = m.phases.findIndex(p => cur !== null && parseFloat(p.n) === parseFloat(cur.n))
+    const isCurrent = (n: string) => cur !== null && parseFloat(n) === parseFloat(cur.n)
+    const at = m.phases.findIndex(p => isCurrent(p.n))
     const shown = m.phases.slice(Math.max(0, at - 3), Math.max(0, at - 3) + 8)
-    const nextLabel = `▶ ${commandLine(m.next)}`
+    const phasesDone = m.phases.filter(p => p.isDone).length
 
     return (
-      <Box flexDirection="column" gap={1}>
+      <Box flexDirection="column" paddingX={1} gap={1}>
         <Box flexDirection="column">
-          <Box justifyContent="space-between">
-            <Text bold wrap="truncate-end">{m.name || m.version}</Text>
-            <Text color="warning"> {m.status}</Text>
-          </Box>
+          <Text bold wrap="wrap">
+            {m.name || m.version}
+          </Text>
+          <Text>
+            <Text color="warning">● {m.status}</Text>
+            <Text dimColor> · {m.version}</Text>
+          </Text>
+        </Box>
+
+        <Box flexDirection="column">
           <Text>
             <Text color="success">{'█'.repeat(filled)}</Text>
             <Text color="inactive">{'░'.repeat(barWidth - filled)}</Text>
-            <Text dimColor> {m.percent}%</Text>
+            <Text bold> {m.percent}%</Text>
           </Text>
-          {m.plansTotal > 0 && <Text dimColor>{m.plansDone}/{m.plansTotal} plans</Text>}
+          <Text dimColor>
+            {[m.plansTotal > 0 && `${m.plansDone}/${m.plansTotal} plans`, m.phases.length > 0 && `${phasesDone}/${m.phases.length} fases`]
+              .filter(Boolean)
+              .join(' · ')}
+          </Text>
         </Box>
 
         {shown.length > 0 && (
           <Box flexDirection="column">
-            <Text dimColor>FASES</Text>
+            <Text dimColor>Fases</Text>
             {shown.map(p => {
-              const isCurrent = cur !== null && parseFloat(p.n) === parseFloat(cur.n)
-              const mark: PlanMark = p.isDone ? 'done' : isCurrent ? 'active' : 'pending'
+              const mark: PlanMark = p.isDone ? 'done' : isCurrent(p.n) ? 'active' : 'pending'
+              const prefix = ` ${p.n}  `
               return (
                 <Button key={`phase-${p.n}`} plain onPress={() => openPhase($, p.n)}>
                   <Text color={markColor[mark]}>{marks[mark]}</Text>
-                  <Text bold={isCurrent} dimColor={mark === 'pending'}> {p.n} {p.name}</Text>
+                  <Text bold={isCurrent(p.n)} dimColor={mark !== 'active'}>
+                    {prefix}
+                    {clip(p.name, width - prefix.length - 1)}
+                  </Text>
                 </Button>
               )
             })}
@@ -147,37 +166,43 @@ export const register: Register = on => {
 
         {cur !== null && cur.waves.length > 0 && (
           <Box flexDirection="column">
-            <Text dimColor>FASE {cur.n} · WAVES</Text>
-            {cur.waves.map(w => (
-              <Text key={String(w.n)} wrap="truncate-end">
-                {w.n}{'  '}
-                {w.plans.map(p => (
-                  <Text key={p.id}>
-                    {p.id} <Text color={markColor[p.mark]}>{marks[p.mark]}</Text>{' '}
-                  </Text>
-                ))}
-                {w.plans.some(p => p.isCheckpoint && p.mark !== 'done') && <Text color="warning">stops for you</Text>}
-              </Text>
-            ))}
+            <Text dimColor>Fase {cur.n} · waves</Text>
+            {cur.waves.map(w => {
+              const isWaveDone = w.plans.every(p => p.mark === 'done')
+              return (
+                <Text key={String(w.n)} wrap="truncate-end">
+                  <Text dimColor>W{w.n}  </Text>
+                  {isWaveDone ? (
+                    <Text dimColor>
+                      {w.plans.map(p => p.id).join(' ')} <Text color="success">✓</Text>
+                    </Text>
+                  ) : (
+                    w.plans.map(p => (
+                      <Text key={p.id}>
+                        {p.id}
+                        <Text color={markColor[p.mark]}>{marks[p.mark]}</Text>{' '}
+                      </Text>
+                    ))
+                  )}
+                  {!isWaveDone && w.plans.some(p => p.isCheckpoint && p.mark !== 'done') && (
+                    <Text color="warning"> stops for you</Text>
+                  )}
+                </Text>
+              )
+            })}
           </Box>
         )}
 
         {m.stoppedAt !== '' && (
           <Box flexDirection="column">
-            <Text dimColor>PAROU EM</Text>
-            <Text dimColor wrap="wrap">{m.stoppedAt}</Text>
+            <Text dimColor>Parou em</Text>
+            <Text wrap="wrap">{m.stoppedAt}</Text>
           </Box>
         )}
 
-        <Box gap={1} flexWrap="wrap">
+        <Box flexDirection="column">
+          <Button key="next" hotkey="2" variant="primary" label={`▶ ${commandLine(m.next)}`} onPress={() => $.command.run({ command: m.next.command, args: m.next.args })} />
           <Button key="clear" hotkey="1" label="/clear" onPress={() => $.command.run({ command: 'clear' })} />
-          <Button
-            key="next"
-            hotkey="2"
-            variant="primary"
-            label={nextLabel}
-            onPress={() => $.command.run({ command: m.next.command, args: m.next.args })}
-          />
         </Box>
       </Box>
     )
