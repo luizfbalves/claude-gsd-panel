@@ -34,7 +34,10 @@ async function openPhase($: EngineInterface, n: string) {
   const d = await loadPhaseDetail($, n).catch(() => null)
   if (d === null) return
   await update($, detail, () => d)
-  await $.ui.open({ id: DIALOG, title: `Fase ${d.n} — ${d.name}`, focus: true, closeOnEscape: true, holdToasts: true, columns: 72 })
+  await $.ui.open({ id: DIALOG, title: `Fase ${d.n}`, focus: true, closeOnEscape: true, holdToasts: true, columns: 72 })
+  if (PHASE_ACTIONS.some(a => a.command === d.next.command)) {
+    await $.ui.focus({ requestId: DIALOG, key: d.next.command }).catch(() => undefined)
+  }
 }
 
 async function runFromDialog($: EngineInterface, a: NextAction) {
@@ -185,18 +188,22 @@ export const register: Register = on => {
     const d = await read($, detail)
     if (d === null) return <Text dimColor>Carregando…</Text>
 
+    const recommended = PHASE_ACTIONS.find(a => a.command === d.next.command)
+
     return (
-      <Box flexDirection="column" gap={1}>
-        {d.goal !== '' && (
-          <Box flexDirection="column">
-            <Text dimColor>OBJETIVO</Text>
-            <Text wrap="wrap">{d.goal}</Text>
-          </Box>
-        )}
+      <Box flexDirection="column" paddingX={2} paddingY={1} gap={1}>
+        <Box flexDirection="column">
+          <Text bold>Fase {d.n}</Text>
+          <Text bold color="claude" wrap="wrap">
+            {d.name}
+          </Text>
+        </Box>
+
+        {d.goal !== '' && <Text wrap="wrap">{d.goal}</Text>}
 
         {d.criteria.length > 0 && (
           <Box flexDirection="column">
-            <Text dimColor>CRITÉRIOS DE SUCESSO</Text>
+            <Text dimColor>Critérios de sucesso</Text>
             {d.criteria.map((c, i) => (
               <Text key={String(i)} wrap="wrap">
                 {i + 1}. {c}
@@ -206,7 +213,7 @@ export const register: Register = on => {
         )}
 
         <Box flexDirection="column">
-          <Text dimColor>PLANS</Text>
+          <Text dimColor>Plans</Text>
           {d.plans.length === 0 && <Text dimColor>Nenhum plan ainda.</Text>}
           {d.plans.map(p => (
             <Box key={p.id} flexDirection="column">
@@ -223,24 +230,24 @@ export const register: Register = on => {
           ))}
         </Box>
 
-        {d.docs.length > 0 && (
-          <Box flexDirection="column">
-            <Text dimColor>ARQUIVOS</Text>
-            <Text wrap="wrap">{d.docs.join('  ')}</Text>
-          </Box>
-        )}
+        {d.docs.length > 0 && <Text dimColor wrap="wrap">{d.docs.join('  ')}</Text>}
 
-        <Box gap={1} flexWrap="wrap">
+        <Box justifyContent="flex-end" gap={2} flexWrap="wrap">
           {PHASE_ACTIONS.map(a => (
             <Button
               key={a.command}
               hotkey={a.hotkey}
-              variant={a.command === d.next.command ? 'primary' : 'secondary'}
+              variant={a === recommended ? 'primary' : 'secondary'}
               label={a.label}
               onPress={() => runFromDialog($, { command: a.command, args: d.n })}
             />
           ))}
-          <Button key="close" hotkey="q" role="dismiss" label="fechar" onPress={() => $.ui.close({ id: DIALOG })} />
+        </Box>
+
+        <Box justifyContent="flex-end">
+          <Text dimColor>
+            <Text bold>tab</Text> próximo · {recommended && <Text><Text bold>enter</Text> {recommended.label} · </Text>}<Text bold>esc</Text> fechar
+          </Text>
         </Box>
       </Box>
     )
