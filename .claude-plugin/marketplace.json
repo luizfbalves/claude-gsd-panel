@@ -1,0 +1,5 @@
+{
+  "name": "claude-gsd-panel",
+  "owner": { "name": "luizfbalves" },
+  "plugins": [{ "name": "gsd-panel", "source": "./" }]
+}
